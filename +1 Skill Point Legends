@@ -1,1 +1,194 @@
 
+-- ================ GZSSF HUB v4.6 (INPUT OVERHAUL) ================
+-- FIX CRÍTICO: Teclas K y L funcionando 100% incluso tras morir.
+-- [K] FLY FARM | [L] AUTOCLICK | [Slider 5 - 200]
+
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local RunService = game:GetService("RunService")
+local VirtualInputManager = game:GetService("VirtualInputManager")
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+
+local player = Players.LocalPlayer
+local character = player.Character or player.CharacterAdded:Wait()
+local hrp = character:WaitForChild("HumanoidRootPart")
+
+-- =============== CONFIG & ESTADO ===============
+local NPC_FOLDER = Workspace:WaitForChild("Npcs")
+local NEON_CYAN = Color3.fromRGB(0, 255, 255)
+local DARK_BG = Color3.fromRGB(15, 15, 18)
+local FLY_SPEED = 180 
+
+local is_script_active = true
+local farming_enabled = false
+local autoclick_enabled = false
+local selected_npc_name = "Todos"
+local farm_distance = 10
+local currentTween = nil
+
+-- =============== SISTEMA DE CUERPO (REFORZADO) ===============
+local function getValidHRP()
+    local char = player.Character
+    if char and char:FindFirstChild("HumanoidRootPart") then
+        return char.HumanoidRootPart
+    end
+    return nil
+end
+
+local function stablize(state)
+    local targetHrp = getValidHRP()
+    if not targetHrp then return end
+    
+    if state then
+        local bv = targetHrp:FindFirstChild("GZSSF_BV") or Instance.new("BodyVelocity")
+        bv.Name = "GZSSF_BV"; bv.Velocity = Vector3.zero; bv.MaxForce = Vector3.new(9e9, 9e9, 9e9); bv.Parent = targetHrp
+        
+        local bg = targetHrp:FindFirstChild("GZSSF_BG") or Instance.new("BodyGyro")
+        bg.Name = "GZSSF_BG"; bg.CFrame = CFrame.Angles(math.rad(-90), 0, 0); bg.MaxTorque = Vector3.new(9e9, 9e9, 9e9); bg.P = 50000; bg.Parent = targetHrp
+    else
+        if targetHrp:FindFirstChild("GZSSF_BV") then targetHrp.GZSSF_BV:Destroy() end
+        if targetHrp:FindFirstChild("GZSSF_BG") then targetHrp.GZSSF_BG:Destroy() end
+    end
+end
+
+-- =============== GUI V4.6 ===============
+local pGui = player:WaitForChild("PlayerGui")
+if pGui:FindFirstChild("GZSSF_V4_6") then pGui.GZSSF_V4_6:Destroy() end
+
+local sg = Instance.new("ScreenGui", pGui); sg.Name = "GZSSF_V4_6"; sg.ResetOnSpawn = false
+local main = Instance.new("Frame", sg); main.Size = UDim2.new(0, 230, 0, 460); main.Position = UDim2.new(0.05, 0, 0.25, 0); main.BackgroundColor3 = DARK_BG; main.Active = true; main.Draggable = true; Instance.new("UICorner", main)
+local title = Instance.new("TextLabel", main); title.Size = UDim2.new(1, 0, 0, 35); title.Text = "GZSSF HUB V4.6"; title.TextColor3 = NEON_CYAN; title.Font = Enum.Font.GothamBold; title.BackgroundTransparency = 1
+
+local toggleBtn = Instance.new("TextButton", main); toggleBtn.Size = UDim2.new(0.9, 0, 0, 35); toggleBtn.Position = UDim2.new(0.05, 0, 0, 40); toggleBtn.Text = "FLY FARM: OFF [K]"; toggleBtn.Font = Enum.Font.GothamBold; toggleBtn.BackgroundColor3 = Color3.fromRGB(30,30,35); toggleBtn.TextColor3 = Color3.new(1,1,1); Instance.new("UICorner", toggleBtn)
+local clickBtn = Instance.new("TextButton", main); clickBtn.Size = UDim2.new(0.9, 0, 0, 35); clickBtn.Position = UDim2.new(0.05, 0, 0, 80); clickBtn.Text = "AUTOCLICK: OFF [L]"; clickBtn.Font = Enum.Font.GothamBold; clickBtn.BackgroundColor3 = Color3.fromRGB(30,30,45); clickBtn.TextColor3 = Color3.new(1,1,1); Instance.new("UICorner", clickBtn)
+
+local distLabel = Instance.new("TextLabel", main); distLabel.Size = UDim2.new(0.9, 0, 0, 20); distLabel.Position = UDim2.new(0.05, 0, 0, 115); distLabel.Text = "Altura: " .. farm_distance .. " studs"; distLabel.TextColor3 = Color3.new(0.8,0.8,0.8); distLabel.Font = Enum.Font.Gotham; distLabel.BackgroundTransparency = 1; distLabel.TextSize = 12
+local distSlider = Instance.new("Frame", main); distSlider.Size = UDim2.new(0.9, 0, 0, 6); distSlider.Position = UDim2.new(0.05, 0, 0, 140); distSlider.BackgroundColor3 = Color3.fromRGB(45, 45, 50); Instance.new("UICorner", distSlider)
+local fill = Instance.new("Frame", distSlider); fill.Size = UDim2.new(0.05, 0, 1, 0); fill.BackgroundColor3 = NEON_CYAN; Instance.new("UICorner", fill)
+local trigger = Instance.new("TextButton", distSlider); trigger.Size = UDim2.new(1, 0, 3, 0); trigger.Position = UDim2.new(0, 0, -1, 0); trigger.BackgroundTransparency = 1; trigger.Text = ""
+
+local scroll = Instance.new("ScrollingFrame", main); scroll.Size = UDim2.new(0.9, 0, 0, 200); scroll.Position = UDim2.new(0.05, 0, 0, 160); scroll.BackgroundTransparency = 0.1; scroll.BackgroundColor3 = Color3.fromRGB(20,20,25); scroll.ScrollBarThickness = 3; scroll.CanvasSize = UDim2.new(0,0,0,0)
+local layout = Instance.new("UIListLayout", scroll); layout.Padding = UDim.new(0, 5); layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+local closeBtn = Instance.new("TextButton", main); closeBtn.Size = UDim2.new(0.9, 0, 0, 30); closeBtn.Position = UDim2.new(0.05, 0, 1, -40); closeBtn.Text = "CERRAR SCRIPT"; closeBtn.BackgroundColor3 = Color3.fromRGB(80, 20, 20); closeBtn.TextColor3 = Color3.new(1,1,1); closeBtn.Font = Enum.Font.GothamBold; Instance.new("UICorner", closeBtn)
+
+-- =============== FUNCIONES TOGGLE ===============
+local function updateFarmVisuals()
+    toggleBtn.Text = farming_enabled and "FLY FARM: ON [K]" or "FLY FARM: OFF [K]"
+    toggleBtn.BackgroundColor3 = farming_enabled and NEON_CYAN or Color3.fromRGB(30, 30, 35)
+    toggleBtn.TextColor3 = farming_enabled and Color3.new(0,0,0) or Color3.new(1,1,1)
+    stablize(farming_enabled)
+end
+
+local function updateClickVisuals()
+    clickBtn.Text = autoclick_enabled and "AUTOCLICK: ON [L]" or "AUTOCLICK: OFF [L]"
+    clickBtn.BackgroundColor3 = autoclick_enabled and NEON_CYAN or Color3.fromRGB(30, 30, 45)
+    clickBtn.TextColor3 = autoclick_enabled and Color3.new(0,0,0) or Color3.new(1,1,1)
+end
+
+-- =============== INPUT FIX (GLOBAL) ===============
+UserInputService.InputBegan:Connect(function(input, processed)
+    if processed or not is_script_active then return end
+    if input.KeyCode == Enum.KeyCode.K then
+        farming_enabled = not farming_enabled
+        updateFarmVisuals()
+    elseif input.KeyCode == Enum.KeyCode.L then
+        autoclick_enabled = not autoclick_enabled
+        updateClickVisuals()
+    end
+end)
+
+-- =============== LÓGICA CORE ===============
+local function cleanName(name) return tostring(name):gsub("%s+", "") end
+
+local function getBestTarget(myHrp)
+    local npcs = NPC_FOLDER:GetChildren()
+    local targetClean = cleanName(selected_npc_name)
+    local nearest = nil; local dist = math.huge
+    for _, v in ipairs(npcs) do
+        if v:IsA("Model") then
+            local cName = cleanName(v.Name)
+            if (targetClean == "Todos" or cName == targetClean) then
+                local rp = v:FindFirstChild("HumanoidRootPart") or v.PrimaryPart
+                if rp then
+                    local d = (myHrp.Position - rp.Position).Magnitude
+                    if d < dist then dist = d; nearest = {model = v, root = rp} end
+                end
+            end
+        end
+    end
+    return nearest
+end
+
+-- BUCLE FARM
+task.spawn(function()
+    while is_script_active do
+        if farming_enabled then
+            local currentHrp = getValidHRP()
+            if currentHrp then
+                stablize(true) -- Asegurar que los BodyMovers existan
+                local target = getBestTarget(currentHrp)
+                if target and target.root then
+                    local offset = target.root.CFrame * CFrame.new(0, farm_distance, 0) * CFrame.Angles(math.rad(-90), 0, 0)
+                    local tdist = (currentHrp.Position - offset.Position).Magnitude
+                    if tdist > 1 then
+                        if currentTween then currentTween:Cancel() end
+                        currentTween = TweenService:Create(currentHrp, TweenInfo.new(tdist/FLY_SPEED, Enum.EasingStyle.Linear), {CFrame = offset})
+                        currentTween:Play()
+                    end
+                end
+            end
+        end
+        task.wait(0.1)
+    end
+end)
+
+-- BUCLE CLICK
+task.spawn(function()
+    while is_script_active do
+        if autoclick_enabled then
+            VirtualInputManager:SendMouseButtonEvent(500, 500, 0, true, game, 0)
+            task.wait(0.01)
+            VirtualInputManager:SendMouseButtonEvent(500, 500, 0, false, game, 0)
+        end
+        task.wait(0.05)
+    end
+end)
+
+-- =============== SLIDER & LISTA ===============
+local dragging = false
+trigger.InputBegan:Connect(function(i) if i.UserInputType == Enum.UserInputType.MouseButton1 then dragging = true end end)
+UserInputService.InputEnded:Connect(function(i) if i.UserInputType == Enum.UserInputType.MouseButton1 then dragging = false end end)
+RunService.RenderStepped:Connect(function()
+    if dragging then
+        local mousePos = UserInputService:GetMouseLocation().X
+        local percentage = math.clamp((mousePos - distSlider.AbsolutePosition.X) / distSlider.AbsoluteSize.X, 0, 1)
+        fill.Size = UDim2.new(percentage, 0, 1, 0)
+        farm_distance = math.floor(5 + (percentage * 195))
+        distLabel.Text = "Altura: " .. farm_distance .. " studs"
+    end
+end)
+
+local function updateList()
+    if not is_script_active then return end
+    for _, item in ipairs(scroll:GetChildren()) do if item:IsA("TextButton") then item:Destroy() end end
+    local counts = {}
+    for _, v in ipairs(NPC_FOLDER:GetChildren()) do if v:IsA("Model") then local n = cleanName(v.Name); counts[n] = (counts[n] or 0) + 1 end end
+    local sorted = {}
+    for n in pairs(counts) do table.insert(sorted, n) end
+    table.sort(sorted, function(a, b) return (tonumber(a) or 0) < (tonumber(b) or 0) end)
+    local function create(name)
+        local b = Instance.new("TextButton", scroll); b.Size = UDim2.new(0.95, 0, 0, 30); b.Text = name .. " ("..(counts[name] or "0")..")"
+        b.BackgroundColor3 = (cleanName(selected_npc_name) == name) and NEON_CYAN or Color3.fromRGB(40, 40, 45)
+        b.TextColor3 = (cleanName(selected_npc_name) == name) and Color3.new(0,0,0) or Color3.new(1,1,1); b.Font = Enum.Font.Gotham; b.TextSize = 12; Instance.new("UICorner", b)
+        b.MouseButton1Click:Connect(function() selected_npc_name = name; updateList() end)
+    end
+    create("Todos"); for _, n in ipairs(sorted) do create(n) end
+    scroll.CanvasSize = UDim2.new(0, 0, 0, layout.AbsoluteContentSize.Y + 10)
+end
+
+toggleBtn.MouseButton1Click:Connect(function() farming_enabled = not farming_enabled; updateFarmVisuals() end)
+clickBtn.MouseButton1Click:Connect(function() autoclick_enabled = not autoclick_enabled; updateClickVisuals() end)
+closeBtn.MouseButton1Click:Connect(function() is_script_active = false; farming_enabled = false; stablize(false); sg:Destroy() end)
+
+updateList(); task.spawn(function() while is_script_active do task.wait(5); updateList() end end)
